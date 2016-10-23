@@ -57,12 +57,8 @@ OBJECT_FILES := $(filter-out $(BUILT_FILTER),$(OBJECT_FILES))
 
 OUTPUT_ZIP_FILE ?= $(OUTPUT_DIR)/$(STRIPPED_NAME).zip
 
-VERSION_MAJOR ?= 0
-VERSION_MINOR ?= 0
-VERSION_MICRO ?= 0
-
 LD_FLAGS := $(patsubst %,-L%/lib,$(LIBRARY_DIRS)) $(patsubst %,-l%,$(LIBRARIES))
-COMMON_CC_FLAGS := $(sort $(foreach dir,$(SOURCE_DIRS),$(patsubst %,-I$(BUILD_DIR)/%,$(dir $(call rwildcard,$(dir),*))))) $(patsubst %,-I%,$(INCLUDE_DIRS)) $(patsubst %,-I%/include,$(LIBRARY_DIRS)) -g -Wall -DVERSION_MAJOR=$(VERSION_MAJOR) -DVERSION_MINOR=$(VERSION_MINOR) -DVERSION_MICRO=$(VERSION_MICRO) $(BUILD_FLAGS)
+COMMON_CC_FLAGS := $(sort $(foreach dir,$(SOURCE_DIRS),$(patsubst %,-I$(BUILD_DIR)/%,$(dir $(call rwildcard,$(dir),*))))) $(patsubst %,-I%,$(INCLUDE_DIRS)) $(patsubst %,-I%/include,$(LIBRARY_DIRS)) -g -Wall $(BUILD_FLAGS)
 
 ifeq ($(findstring -O,$(BUILD_FLAGS)),)
 	COMMON_CC_FLAGS += -O2
@@ -88,9 +84,11 @@ ifeq ($(TARGET),3DS)
 
     OBJECT_FILES := $(filter-out $(BUILT_FILTER),$(OBJECT_FILES))
 
-    REMOTE_IP ?= 127.0.0.1 # User-defined
+    ifeq ($(strip $(TITLE)),)
+        TITLE := $(NAME)
+    endif
 
-    TITLE ?= $(NAME)
+    REMOTE_IP ?= 127.0.0.1 # User-defined
 
     CATEGORY ?= Application
     USE_ON_SD ?= true
@@ -131,10 +129,16 @@ ifeq ($(TARGET),3DS)
                 BANNERTOOL := $(BUILDTOOLS_DIR)/3ds/bannertool-linux32
                 CITRA := $(BUILDTOOLS_DIR)/3ds/citra/citra-linux32
             endif
-        else ifeq ($(UNAME_S),Darwin)
-            MAKEROM := $(BUILDTOOLS_DIR)/3ds/makerom-mac
-            BANNERTOOL := $(BUILDTOOLS_DIR)/3ds/bannertool-mac
-            CITRA := $(BUILDTOOLS_DIR)/3ds/citra/citra-mac
+        else
+            ifeq ($(UNAME_S),Darwin)
+                MAKEROM := $(BUILDTOOLS_DIR)/3ds/makerom-mac
+                BANNERTOOL := $(BUILDTOOLS_DIR)/3ds/bannertool-mac
+                CITRA := $(BUILDTOOLS_DIR)/3ds/citra/citra-mac
+            else
+                 MAKEROM := makerom
+                 BANNERTOOL := bannertool
+                 CITRA := citra
+             endif
         endif
     endif
 
@@ -148,7 +152,7 @@ ifeq ($(TARGET),3DS)
     COMMON_CC_FLAGS += -mword-relocations -fomit-frame-pointer -ffast-math -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -DARM11 -D_3DS
 
     _3DSXTOOL_FLAGS :=
-    COMMON_MAKEROM_FLAGS := -rsf $(BUILDTOOLS_DIR)/3ds/template.rsf -target t -exefslogo -icon $(BUILD_DIR)/icon.icn -banner $(BUILD_DIR)/banner.bnr -major $(VERSION_MAJOR) -minor $(VERSION_MINOR) -micro $(VERSION_MICRO) -DAPP_TITLE="$(TITLE)" -DAPP_PRODUCT_CODE="$(PRODUCT_CODE)" -DAPP_UNIQUE_ID="$(UNIQUE_ID)" -DAPP_SYSTEM_MODE="$(SYSTEM_MODE)" -DAPP_SYSTEM_MODE_EXT="$(SYSTEM_MODE_EXT)" -DAPP_CATEGORY="$(CATEGORY)" -DAPP_USE_ON_SD="$(USE_ON_SD)" -DAPP_MEMORY_TYPE="$(MEMORY_TYPE)" -DAPP_CPU_SPEED="$(CPU_SPEED)" -DAPP_ENABLE_L2_CACHE="$(ENABLE_L2_CACHE)" -DAPP_VERSION_MAJOR="$(VERSION_MAJOR)"
+    COMMON_MAKEROM_FLAGS := -rsf $(BUILDTOOLS_DIR)/3ds/template.rsf -target t -exefslogo -icon $(BUILD_DIR)/icon.icn -banner $(BUILD_DIR)/banner.bnr -DAPP_TITLE="$(TITLE)" -DAPP_PRODUCT_CODE="$(PRODUCT_CODE)" -DAPP_UNIQUE_ID="$(UNIQUE_ID)" -DAPP_SYSTEM_MODE="$(SYSTEM_MODE)" -DAPP_SYSTEM_MODE_EXT="$(SYSTEM_MODE_EXT)" -DAPP_CATEGORY="$(CATEGORY)" -DAPP_USE_ON_SD="$(USE_ON_SD)" -DAPP_MEMORY_TYPE="$(MEMORY_TYPE)" -DAPP_CPU_SPEED="$(CPU_SPEED)" -DAPP_ENABLE_L2_CACHE="$(ENABLE_L2_CACHE)"
 
     ifneq ("$(wildcard $(ROMFS_DIR))","")
         _3DSXTOOL_FLAGS += --romfs=$(ROMFS_DIR)
@@ -251,8 +255,8 @@ endif
 
 # FINAL COMMON SETUP #
 
-CC_FLAGS := $(COMMON_CC_FLAGS) -std=gnu99
-CXX_FLAGS := $(COMMON_CC_FLAGS) -std=gnu++11
+CC_FLAGS := $(COMMON_CC_FLAGS) -std=gnu99 -I$(DEVKITPRO)/portlibs/armv6k/include -O0 -w -Werror -Wno-unused -Wno-unused-variable -fPIC
+CXX_FLAGS := $(COMMON_CC_FLAGS) -std=gnu++11 -I$(DEVKITPRO)/portlibs/armv6k/include -O0 -w -Werror -Wno-unused -Wno-unused-variable -fPIC
 
 ifneq ($(EXTRA_OUTPUT_FILES),)
     EXTRA_OUTPUT_COPY_CMD := cp -r $(EXTRA_OUTPUT_FILES) $(OUTPUT_DIR)
@@ -318,7 +322,7 @@ $(BUILD_DIR)/%.shbin.c: %.shlist
 
 %.icn: $(ICON)
 	@echo $@
-	@$(BANNERTOOL) makesmdh -s "$(TITLE)" -l "$(TITLE) - $(DESCRIPTION)" -p "$(AUTHOR)" -i $(ICON) $(ICON_FLAGS) -o $@ > /dev/null
+	@$(BANNERTOOL) makesmdh -s "$(TITLE)" -l "$(TITLE)" -p "$(AUTHOR)" -i $(ICON) $(ICON_FLAGS) -o $@ > /dev/null
 
 %.smdh: $(ICON)
 	@echo $@
@@ -330,7 +334,7 @@ $(OUTPUT_DIR)/3ds/$(STRIPPED_NAME)/%.3dsx: $(OUTPUT_DIR)/%.elf $(BUILD_DIR)/meta
 
 %.3ds: %.elf $(BUILD_DIR)/banner.bnr $(BUILD_DIR)/icon.icn
 	@echo $@
-	@$(MAKEROM) -f cci -o $@ -elf $< -DAPP_ENCRYPTED=true $(COMMON_MAKEROM_FLAGS)
+	@$(MAKEROM) -f cci -o $@ -elf $< -DAPP_ENCRYPTED=false $(COMMON_MAKEROM_FLAGS)
 
 %.cia: %.elf $(BUILD_DIR)/banner.bnr $(BUILD_DIR)/icon.icn
 	@echo $@
